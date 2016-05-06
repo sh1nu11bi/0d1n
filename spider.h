@@ -8,7 +8,7 @@
 #include <time.h>
 #include <sys/wait.h>
 #include <errno.h>
-
+#include <limits.h>
 #include <curl/curl.h>
 //#include <curl/types.h>
 #include <curl/easy.h>
@@ -19,6 +19,7 @@
 #include "string_ops.h"
 #include "file_ops.h"
 #include "tamper.h"
+#include "get_csrf_token.h"
 
 // colors macro
 #define RED "\033[22;31m"

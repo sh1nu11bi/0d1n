@@ -13,7 +13,7 @@ void spider(void *pack,char *line,char * pathtable)
 	bool match_string=false,save_response=false,test_tamper=false;
 	long status=0,length=0;
 	int old=0,res=0,counter=0,counter_cookie=0,counter_agent=0,POST=0,timeout=0,debug_host=3; 
-	char *make=NULL,*make_cookie=NULL,*make_agent=NULL,*tamper=NULL,*responsetemplate=NULL,*tmp_response=NULL,*tmp_make=NULL,*tmp_make_cookie=NULL,*tmp_make_agent=NULL,*tmp_line=NULL,*tmp_line2=NULL;
+	char *make=NULL,*make2=NULL,*make_cookie=NULL,*make_agent=NULL,*tamper=NULL,*responsetemplate=NULL,*tmp_response=NULL,*tmp_make=NULL,*tmp_make_cookie=NULL,*tmp_make_agent=NULL,*tmp_line=NULL,*tmp_line2=NULL,*token=NULL;
 	char **pack_ptr=(char **)pack,**arg = pack_ptr;
 	char randname[16],line2[1024],log[2048],tabledata[4086],pathsource[1024];
 
@@ -23,8 +23,18 @@ void spider(void *pack,char *line,char * pathtable)
 	if(arg[8]!=NULL)
 		timeout=atoi(arg[8]);
 
+// if need get anti-csrf token
+	if(arg[22]!=NULL && arg[23]!=NULL)
+	{
+		if(arg[6]!=NULL)
+			token=get_anti_csrf_token(arg[22],arg[23],arg[6]);
+		else
+			token=get_anti_csrf_token(arg[22],arg[23],"Mozilla/5.0 (0d1n v0.1)");
+	}
 
-// payload tamper 
+
+
+// payload tamper, get payload of line and make tamper 
 	if(arg[20]!=NULL)
 	{
 		tamper=arg[20];
@@ -88,6 +98,15 @@ void spider(void *pack,char *line,char * pathtable)
 		}
 
 
+
+		if(strstr(tamper,"replace_keywords"))
+		{
+			line=replace_keywords(line);
+			test_tamper=true;
+		}
+
+
+
 		if(test_tamper==false)
 		{
 			DEBUG("error at tamper argument\n");
@@ -96,9 +115,6 @@ void spider(void *pack,char *line,char * pathtable)
 
 		
 	}
-
-
-		
 
 	memset(pathsource,0,sizeof(char)*1023);
 
@@ -115,12 +131,13 @@ void spider(void *pack,char *line,char * pathtable)
 		counter_cookie=char_type_counter(arg[13]!=NULL?arg[13]:"",'^');
 		counter_agent=char_type_counter(arg[19]!=NULL?arg[19]:"",'^');
 		old=counter;  
+
 	} else {
+
 		char *file_request=readLine(arg[21]);
 		counter=char_type_counter(file_request,'^');
 		old=counter;
 		xfree((void**)&file_request);
-
 	}
 	chomp(line);
 
@@ -142,14 +159,17 @@ void spider(void *pack,char *line,char * pathtable)
 
 
 		curl = curl_easy_init();
-// DEBUG("counts ^ : %d \n",old);	
 		
-
+// add payload at inputs
 		if(arg[21]==NULL)
 		{
-			make=payload_injector( (POST?arg[4]:arg[0]),line,old);
-		 		
-			if(arg[13]!=NULL)
+			make2=payload_injector( (POST?arg[4]:arg[0]),line,old);
+			if(token!=NULL)
+		 		make=replace(make2,"{token}",token); // if user pass token to bypass anti-csrf
+			else
+				make=strdup(make2);	
+
+			if(arg[13]!=NULL)	
 				make_cookie=payload_injector( arg[13],line,counter_cookie);	
 	
 			if(arg[19]!=NULL)
@@ -159,8 +179,13 @@ void spider(void *pack,char *line,char * pathtable)
 		} else {
 // if is custom request
 			char *request_file=readLine(arg[21]);
-			make=payload_injector( request_file,line,old);	
+			make2=payload_injector( request_file,line,old);	
 			curl_easy_setopt(curl,  CURLOPT_URL, arg[0]);
+			if(token!=NULL)
+				make=replace(make2,"{token}",token); // if user pass token to bypass anti-csrf
+			else
+				make=strdup(make2);
+
 			xfree((void**)&request_file);
 		}	
  
@@ -261,23 +286,25 @@ void spider(void *pack,char *line,char * pathtable)
 		if(arg[18] != NULL)
 		{
 			char *randproxy=Random_linefile(arg[18]);
-	//		printf("PROXY LOAD: %s\n",randproxy);
 			curl_easy_setopt(curl, CURLOPT_PROXY, randproxy);
 	//		curl_easy_setopt(curl, CURLOPT_HTTPPROXYTUNNEL, 1);
 		}
 
-
+// choice SSL version
 		if ( arg[9] != NULL ) 
 			curl_easy_setopt(curl,CURLOPT_SSLVERSION,(long)atoi(arg[9]));
 
                 curl_easy_setopt(curl,CURLOPT_VERBOSE,0); 
 		curl_easy_setopt(curl,CURLOPT_HEADER,1);  
 		
+// if use custom request
 		if(arg[21]!=NULL)
 		{
 			curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
 		}
+
 		res=curl_easy_perform(curl);
+// get HTTP status code
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,&status);
 
 // custom http request
@@ -291,7 +318,7 @@ void spider(void *pack,char *line,char * pathtable)
 				DEBUG("error in socket at custom http request");
 			}
 			res=curl_easy_send(curl, make, strlen(make), &iolen);
-// recv data
+// recv data of custom request
 			while(1)
 			{
 				wait_on_socket(sockfd, 1, 60000L);
@@ -320,7 +347,7 @@ void spider(void *pack,char *line,char * pathtable)
 		else
 			length=chunk.size;
 
-		
+// if have error at status		
 		if(status==0)
 		{	
 			debug_host--;
@@ -517,15 +544,9 @@ void spider(void *pack,char *line,char * pathtable)
 			memset(tabledata,0,4085);
 			memset(pathsource,0,strlen(pathsource)-1);
 
-//DEBUG("part B");
-
 		}
 
-//DEBUG("END PARTS");
-//		memset(make,0,strlen(make)-1);
-//		memset(make_cookie,0,strlen(make_cookie)-1);
-//		memset(make_agent,0,strlen(make_agent)-1);
-//		memset(pathsource,0,strlen(pathsource)-1);
+
 		xfree((void **)&chunk.memory);
 	
 	//	curl_easy_cleanup(curl);
@@ -546,9 +567,11 @@ void spider(void *pack,char *line,char * pathtable)
 	
 	}
 
+// clear all
 	xfree((void **)&make_agent);
 	xfree((void **)&make_cookie);
 	xfree((void **)&make);
+	xfree((void **)&make2);
 	xfree((void **)&tmp_make);
 	xfree((void **)&tmp_make_cookie);
 	xfree((void **)&tmp_make_agent); 
@@ -559,7 +582,9 @@ void spider(void *pack,char *line,char * pathtable)
 
 	if(arg[20] != NULL)
 		xfree((void **)&line);
-//	DEBUG("GOOO3");
+
+	if(arg[22] != NULL)
+		xfree((void **)&token);
  
 }
 
@@ -580,12 +605,13 @@ void scan(void *arguments)
 
 	int old_thread=threadss;
 	int status=-1;
-
  	int timeout=3;
+	long int total_requests=0;
 
 	if(arg[8]!=NULL)
 		timeout=atoi(arg[8]);
- 
+
+ // write tables rows at datatables file to load
 	pathtable=xmalloc(sizeof(char)*64);
 	memset(pathtable,0, sizeof(char)*63);
 	strncat(pathtable,"tables/",8);
@@ -634,6 +660,10 @@ void scan(void *arguments)
 		pid=fork();
 		curl_global_init(CURL_GLOBAL_ALL);
 
+
+		if(total_requests<LONG_MAX)
+			total_requests++;
+
  
 		if(pid==-1)
 		{
@@ -647,6 +677,8 @@ void scan(void *arguments)
 //			curl_global_init(CURL_GLOBAL_ALL);
 			threadss--;
 			spider(arguments,line,pathtable);
+
+
 //			curl_global_cleanup();
 			exit(0);
 		}
@@ -684,12 +716,14 @@ void scan(void *arguments)
 
 	sleep(timeout);
 
+// end of json file
 	WriteFile(pathtable," [\"\",\"\",\"\",\"\",\"\"] \n ] }");
 
 	puts(RED);
-	fprintf(stdout,"end scan \n look the file %s\n \n",pathhammer);
+	fprintf(stdout,"End scan \n look the file %s\n Total Requests %ld\n",pathhammer, total_requests);
 	puts(LAST);
 
+// clear all
 	memset(pathtable,0,sizeof(char)*strlen(pathtable)-1);
 	xfree((void **)&pathtable);
 	memset(pathhammer,0,sizeof(char)*strlen(pathhammer)-1);
